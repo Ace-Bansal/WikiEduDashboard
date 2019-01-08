@@ -2,7 +2,7 @@ import React from 'react';
 import createReactClass from 'create-react-class';
 import PropTypes from 'prop-types';
 import { connect } from 'react-redux';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import _ from 'lodash';
 
 import { updateCourse } from '../../actions/course_actions';
@@ -19,6 +19,7 @@ import TextAreaInput from '../common/text_area_input.jsx';
 import CourseUtils from '../../utils/course_utils.js';
 import CourseDateUtils from '../../utils/course_date_utils.js';
 import CourseLevelSelector from './course_level_selector.jsx';
+import CourseType from './course_type.jsx';
 
 const CourseCreator = createReactClass({
   displayName: 'CourseCreator',
@@ -49,6 +50,7 @@ const CourseCreator = createReactClass({
       showCourseForm: false,
       showCloneChooser: false,
       showEventDates: false,
+      showWizardForm: false,
       default_course_type: this.props.courseCreator.defaultCourseType,
       course_string_prefix: this.props.courseCreator.courseStringPrefix,
       use_start_and_end_times: this.props.courseCreator.useStartAndEndTimes
@@ -112,14 +114,15 @@ const CourseCreator = createReactClass({
           window.location = `/courses/${course.slug}`;
         }
       } else if (!this.state.justSubmitted) {
-        this.setState({ course: CourseUtils.cleanupCourseSlugComponents(course) });
+        const cleanedCourse = CourseUtils.cleanupCourseSlugComponents(course);
+        this.setState({ course: cleanedCourse });
         this.setState({ isSubmitting: false });
         this.setState({ justSubmitted: true });
         // If the save callback fails, which will happen if an invalid wiki is submitted,
         // then we must reset justSubmitted so that the user can fix the problem
         // and submit again.
         const onSaveFailure = () => this.setState({ justSubmitted: false });
-        this.props.submitCourse({ course }, onSaveFailure);
+        this.props.submitCourse({ course: cleanedCourse }, onSaveFailure);
       }
     } else if (!this.props.validations.exists.valid) {
       this.setState({ isSubmitting: false });
@@ -135,6 +138,10 @@ const CourseCreator = createReactClass({
     if (_.includes(['title', 'school', 'term'], key)) {
       return this.props.setValid('exists');
     }
+  },
+
+  updateCourseType(key, value) {
+    this.props.updateCourse({ [key]: value });
   },
 
   updateCourseDates(key, value) {
@@ -169,8 +176,13 @@ const CourseCreator = createReactClass({
     return true;
   },
 
-  showCourseForm() {
-    return this.setState({ showCourseForm: true });
+  showCourseForm(programName) {
+    this.updateCourseType('type', programName);
+
+    return this.setState({
+      showCourseForm: true,
+      showWizardForm: false
+    });
   },
 
   showCloneChooser() {
@@ -179,6 +191,14 @@ const CourseCreator = createReactClass({
 
   cancelClone() {
     return this.setState({ showCloneChooser: false });
+  },
+
+  chooseNewCourse() {
+    if (Features.wikiEd) {
+      this.setState({ showCourseForm: true });
+    } else {
+      this.setState({ showWizardForm: true });
+    }
   },
 
   useThisClass() {
@@ -192,20 +212,27 @@ const CourseCreator = createReactClass({
     if (this.props.loadingUserCourses) {
       return <div />;
     }
-    // There are three fundamental states: NewOrClone, CourseForm, and CloneChooser
+    // There are four fundamental states: NewOrClone, CourseForm, wizardForm and CloneChooser
     let showCourseForm;
     let showCloneChooser;
     let showNewOrClone;
-    // If user has no courses, just open the CourseForm immediately because there are no cloneable courses.
-    if (this.props.cloneableCourses.length === 0) {
-      showCourseForm = true;
+    let showWizardForm;
     // If the creator was launched from a campaign, do not offer the cloning option.
-    } else if (this.campaignParam()) {
+    if (this.campaignParam()) {
       showCourseForm = true;
+    } else if (this.state.showWizardForm) {
+      showWizardForm = true;
     } else if (this.state.showCourseForm) {
       showCourseForm = true;
     } else if (this.state.showCloneChooser) {
       showCloneChooser = true;
+    // If user has no courses, just open the CourseForm immediately because there are no cloneable courses.
+    } else if (this.props.cloneableCourses.length === 0) {
+      if (this.state.showCourseForm || Features.wikiEd) {
+        showCourseForm = true;
+      } else {
+        showWizardForm = true;
+      }
     } else {
       showNewOrClone = true;
     }
@@ -225,8 +252,10 @@ const CourseCreator = createReactClass({
     }
 
     let courseFormClass = 'wizard__form';
+    let courseWizard = 'wizard__program';
 
     courseFormClass += showCourseForm ? '' : ' hidden';
+    courseWizard += showWizardForm ? '' : ' hidden';
 
     const cloneOptions = showNewOrClone ? '' : ' hidden';
     const controlClass = `wizard__panel__controls ${courseFormClass}`;
@@ -353,7 +382,6 @@ const CourseCreator = createReactClass({
     }
 
     const dateProps = CourseDateUtils.dateProps(this.props.course);
-
     const timeZoneMessage = (
       <p className="form-help-text">
         {I18n.t('courses.time_zone_message')}
@@ -421,9 +449,13 @@ const CourseCreator = createReactClass({
             <h3>{CourseUtils.i18n('creator.create_new', this.state.course_string_prefix)}</h3>
             <p>{instructions}</p>
             <div className={cloneOptions}>
-              <button className="button dark" onClick={this.showCourseForm}>{CourseUtils.i18n('creator.create_label', this.state.course_string_prefix)}</button>
+              <button className="button dark" onClick={this.chooseNewCourse}>{CourseUtils.i18n('creator.create_label', this.state.course_string_prefix)}</button>
               <button className="button dark" onClick={this.showCloneChooser}>{CourseUtils.i18n('creator.clone_previous', this.state.course_string_prefix)}</button>
             </div>
+            <CourseType
+              wizardClass={courseWizard}
+              wizardAction={this.showCourseForm}
+            />
             <div className={selectClassName}>
               <select id="reuse-existing-course-select" ref={(dropdown) => { this.courseSelect = dropdown; }}>{options}</select>
               <button className="button dark" onClick={this.useThisClass}>{CourseUtils.i18n('creator.clone_this', this.state.course_string_prefix)}</button>
